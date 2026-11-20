@@ -18,6 +18,7 @@ export interface Country {
   capitals?: Array<{ name?: string | null }> | null;
   region?: string | null;
   subregion?: string | null;
+  continents?: string[] | null;
   population?: number | null;
   area?: { kilometers?: number | null } | null;
   languages?: Array<{ name?: string | null; native?: string | null }> | null;
@@ -67,6 +68,10 @@ function apiMessage(body: ApiEnvelope<unknown> | null, status: number): string {
     return 'La API key no es válida. Revisa VITE_RESTCOUNTRIES_API_KEY.';
   }
 
+  if (body?.errors?.[0]?.code === 'general.origin_not_allowed') {
+    return 'La clave no permite consultas desde este sitio. Agrega "localhost" en los orígenes permitidos (CORS) de la clave, en restcountries.com/api-keys.';
+  }
+
   if (status === 403) {
     return 'La cuenta alcanzó su límite mensual o está bloqueada. Revisa tu plan de RestCountries.';
   }
@@ -105,13 +110,78 @@ async function getObjects<T>(baseUrl: string, path = ''): Promise<T[]> {
   return objects;
 }
 
-export async function getCountries(): Promise<Country[]> {
-  const params = new URLSearchParams({
-    limit: '24',
-    response_fields:
-      'names.common,codes.alpha_2,codes.alpha_3,capitals,region,population,currencies,flag.emoji',
+// Campos que necesita la tarjeta del listado (respuesta mas liviana).
+const LIST_FIELDS =
+  'names.common,codes.alpha_2,codes.alpha_3,capitals,region,continents,population,currencies,flag.emoji';
+const PAGE_SIZE = 100; // maximo por pedido en el plan gratuito
+const listCache = new Map<string, Promise<Country[]>>();
+
+// La API entrega las monedas como lista [{ code, name, symbol }].
+// Se convierten a un objeto indexado por codigo, que es la forma que usan las pantallas.
+function normalizeCountry(country: Country): Country {
+  const raw: unknown = country.currencies;
+  if (!Array.isArray(raw)) return country;
+
+  const currencies: Record<string, CountryCurrency> = {};
+  for (const item of raw as Array<{ code?: string; name?: string; symbol?: string }>) {
+    if (item?.code)
+      currencies[item.code] = { name: item.name ?? null, symbol: item.symbol ?? null };
+  }
+  return { ...country, currencies };
+}
+
+// Trae todas las paginas de un listado y las ordena por nombre.
+async function getCountryList(
+  path: string,
+  extra: Record<string, string> = {},
+): Promise<Country[]> {
+  const result: Country[] = [];
+  for (let offset = 0; offset < 400; offset += PAGE_SIZE) {
+    const params = new URLSearchParams({
+      ...extra,
+      limit: String(PAGE_SIZE),
+      offset: String(offset),
+      response_fields: LIST_FIELDS,
+    });
+    const page = await getObjects<Country>(COUNTRIES_BASE_URL, `${path}?${params.toString()}`);
+    result.push(...page.map(normalizeCountry));
+    if (page.length < PAGE_SIZE) break;
+  }
+  return result
+    .filter((country) => country.codes?.alpha_2)
+    .sort((a, b) => (a.names?.common ?? '').localeCompare(b.names?.common ?? '', 'es'));
+}
+
+// Guarda en memoria cada listado para no repetir consultas (1000 por mes en el plan gratuito).
+function cachedList(key: string, load: () => Promise<Country[]>): Promise<Country[]> {
+  const saved = listCache.get(key);
+  if (saved) return saved;
+  const request = load().catch((error: unknown) => {
+    listCache.delete(key);
+    throw error;
   });
-  return getObjects<Country>(COUNTRIES_BASE_URL, `?${params.toString()}`);
+  listCache.set(key, request);
+  return request;
+}
+
+// Listado inicial: GET /countries/v5
+export function getCountries(): Promise<Country[]> {
+  return cachedList('all', () => getCountryList(''));
+}
+
+// Busqueda por capital: GET /countries/v5/capitals?q={texto}
+export function searchCountriesByCapital(text: string): Promise<Country[]> {
+  const query = text.trim();
+  return cachedList(`capital:${query.toLowerCase()}`, () =>
+    getCountryList('/capitals', { q: query }),
+  );
+}
+
+// Filtro por continente: GET /countries/v5/region/{continente}
+export function getCountriesByContinent(region: string): Promise<Country[]> {
+  return cachedList(`region:${region}`, () =>
+    getCountryList(`/region/${encodeURIComponent(region)}`),
+  );
 }
 
 export async function getCountryByAlpha2(code: string): Promise<Country> {
@@ -121,7 +191,7 @@ export async function getCountryByAlpha2(code: string): Promise<Country> {
   );
   const country = countries[0];
   if (!country) throw new Error('No encontramos ese país. Vuelve al listado e inténtalo otra vez.');
-  return country;
+  return normalizeCountry(country);
 }
 
 export async function getCountryByAlpha3(code: string): Promise<Country | null> {
@@ -133,7 +203,7 @@ export async function getCountryByAlpha3(code: string): Promise<Country | null> 
     COUNTRIES_BASE_URL,
     `/codes.alpha_3/${encodeURIComponent(normalizedCode)}`,
   )
-    .then((countries) => countries[0] ?? null)
+    .then((countries) => (countries[0] ? normalizeCountry(countries[0]) : null))
     .catch(() => null);
 
   countryByAlpha3Cache.set(normalizedCode, request);

@@ -1563,3 +1563,27 @@ input {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Filtros del listado: buscador por capital y selector de continente */
+.filters-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 240px;
+  gap: 16px;
+  margin-top: 34px;
+}
+.filter-field label {
+  display: block;
+  margin-bottom: 6px;
+  color: #61716a;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+}
+.filter-field .q-field--outlined .q-field__control {
+  border-radius: 12px;
+}
+@media (max-width: 700px) {
+  .filters-row {
+    grid-template-columns: 1fr;
+  }
+}
