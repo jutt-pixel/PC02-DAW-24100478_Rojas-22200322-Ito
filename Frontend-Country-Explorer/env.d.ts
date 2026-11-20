@@ -1,15 +1,10 @@
 /**
- * Add types (that are not auto-magically added by Quasar CLI already)
- * for your custom variables to avoid TypeScript errors, like dynamic
- * process.env variables or definitions in dotenv files configured ONLY
- * for the /quasar.config file itself.
- *
+ * Tipos de las variables de entorno que usa la aplicacion.
  * https://quasar.dev/quasar-cli-vite/handling-import-meta-env#type-inference
- *
- * @example
- * interface ImportMetaEnv {
- *   readonly MY_VAR: string;
- *   readonly MY_OTHER_VAR: string;
- * }
  */
-interface ImportMetaEnv {}
+interface ImportMetaEnv {
+  // Clave de RestCountries (archivo .env.local, no se sube al repositorio).
+  readonly QCLI_RESTCOUNTRIES_KEY?: string;
+  // Opcional: otra direccion base de la API.
+  readonly QCLI_API_ROOT?: string;
+}
