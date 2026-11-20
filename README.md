@@ -15,14 +15,14 @@ El proyecto está en la carpeta `Frontend-Country-Explorer`.
 
 ### Parte A – Listado, búsqueda y filtro (Rojas)
 
-- **Buscador por capital** con espera de 400 ms después de la última tecla: `src/pages/index/(index).vue`
-- **Selector de continente** (reemplaza el campo región de la API): `src/pages/index/(index).vue`
+- **Buscador por capital** en la cabecera, con sugerencias y envío explícito: `src/pages/index.vue`
+- **Selector de continente** en el filtro del buscador: `src/pages/index.vue`
 - **Listado completo de países**: la API entrega como máximo 100 por pedido, así que se recorren las páginas (`limit` y `offset`) y se pide solo lo que muestra la tarjeta (`response_fields`): `src/services/restCountries.ts`
 - Funciones del servicio `getCountries`, `searchCountriesByCapital` y `getCountriesByContinent`, con memoria de respuestas para cuidar el límite de consultas: `src/services/restCountries.ts`
 - Continente en cada tarjeta y estado **«sin resultados»** con botón «Limpiar filtros».
 - Descarte de respuestas antiguas cuando llega una búsqueda más nueva.
-- Conversión de las monedas que entrega la API (lista) a la forma que usan las pantallas (función `normalizeCountry`).
-- Lectura de la clave desde el archivo `.env` con Quasar CLI (prefijo `VITE_` en `quasar.config.ts`) y mensaje claro cuando la clave no admite el origen `localhost`.
+- Lectura de todas las monedas que entrega la API con `getCountryCurrencies`.
+- Lectura de la clave desde el archivo `.env` con Quasar CLI (`QCLI_RESTCOUNTRIES_API_KEY` y compatibilidad con `VITE_RESTCOUNTRIES_API_KEY`) y mensaje claro cuando la clave no admite el origen `localhost`.
 - Estilos de la fila de filtros: `src/css/app.scss`
 
 ### Parte B – Detalle y tipo de cambio (Ito)
@@ -61,14 +61,13 @@ El proyecto está en la carpeta `Frontend-Country-Explorer`.
 ## Configuración de la clave de la API
 
 1. Crear una cuenta en <https://restcountries.com/sign-up> y copiar la clave.
-2. En <https://restcountries.com/api-keys>, abrir la clave (Edit API key), usar el enlace **Add localhost & 127.0.0.1** en **CORS allowed origins** y guardar. Sin este paso la API rechaza los pedidos hechos desde el navegador.
-3. Dentro de la carpeta `Frontend-Country-Explorer`, copiar el archivo `.env.example` como `.env` y colocar la clave:
+2. Dentro de la carpeta `Frontend-Country-Explorer`, copiar el archivo `.env.example` como `.env` y colocar la clave:
 
 ```
-VITE_RESTCOUNTRIES_API_KEY=tu_clave
+QCLI_RESTCOUNTRIES_API_KEY=tu_clave
 ```
 
-El archivo `.env` no se sube al repositorio.
+El archivo `.env` no se sube al repositorio. En desarrollo Quasar añade la clave al reenviar la consulta. Si sirves la compilación estática, autoriza el nombre de host (sin protocolo ni puerto) en los [orígenes de la clave](https://restcountries.com/api-keys).
 
 ## Cómo ejecutar
 

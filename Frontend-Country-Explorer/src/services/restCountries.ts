@@ -1,7 +1,9 @@
-const COUNTRIES_BASE_URL = 'https://api.restcountries.com/countries/v5';
-const CURRENCIES_BASE_URL = 'https://api.restcountries.com/currencies/v1';
+const apiBase = import.meta.env.DEV ? '/api/restcountries' : 'https://api.restcountries.com';
+const COUNTRIES_BASE_URL = apiBase + '/countries/v5';
+const CURRENCIES_BASE_URL = apiBase + '/currencies/v1';
 
 export interface CountryCurrency {
+  code: string;
   name?: string | null;
   symbol?: string | null;
 }
@@ -27,8 +29,19 @@ export interface Country {
   tlds?: string[] | null;
   cars?: { driving_side?: string | null } | null;
   borders?: string[] | null;
-  currencies?: Record<string, CountryCurrency> | null;
+  currencies?: CountryCurrency[] | null;
   flag?: { svg?: string | null; png?: string | null; emoji?: string | null } | null;
+}
+
+export function getCountryCurrencies(country: Country): CurrencyInfo[] {
+  if (!Array.isArray(country.currencies)) return [];
+  return country.currencies
+    .filter((currency) => typeof currency?.code === 'string' && currency.code.trim().length > 0)
+    .map((currency) => ({
+      code: currency.code.toUpperCase(),
+      name: currency.name || currency.code,
+      symbol: currency.symbol ?? null,
+    }));
 }
 
 interface ApiError {
@@ -39,6 +52,7 @@ interface ApiError {
 interface ApiEnvelope<T> {
   data?: {
     objects?: T[];
+    meta?: { more?: boolean };
   };
   errors?: ApiError[];
 }
@@ -58,42 +72,61 @@ export interface CurrencyConversion {
   as_of: number;
 }
 
-const apiKey = import.meta.env.VITE_RESTCOUNTRIES_API_KEY?.trim();
-const countryByAlpha3Cache = new Map<string, Promise<Country | null>>();
+const apiKey =
+  import.meta.env.QCLI_RESTCOUNTRIES_API_KEY?.trim() ||
+  import.meta.env.VITE_RESTCOUNTRIES_API_KEY?.trim();
 
 function apiMessage(body: ApiEnvelope<unknown> | null, status: number): string {
   const message = body?.errors?.[0]?.message;
 
   if (status === 401) {
-    return 'La API key no es válida. Revisa VITE_RESTCOUNTRIES_API_KEY.';
+    return 'La API key no es válida. Revisa QCLI_RESTCOUNTRIES_API_KEY.';
   }
 
   if (body?.errors?.[0]?.code === 'general.origin_not_allowed') {
-    return 'La clave no permite consultas desde este sitio. Agrega "localhost" en los orígenes permitidos (CORS) de la clave, en restcountries.com/api-keys.';
+    return 'La clave no permite consultas desde este sitio. Agrega el origen del navegador en la configuración CORS de RestCountries.';
+  }
+
+  if (status === 429) {
+    return 'Se hicieron demasiadas consultas. Espera unos segundos y vuelve a intentar.';
   }
 
   if (status === 403) {
-    return 'La cuenta alcanzó su límite mensual o está bloqueada. Revisa tu plan de RestCountries.';
+    return 'La solicitud fue rechazada (HTTP 403). Revisa la configuración de la clave y la cuenta; también puede tratarse de un bloqueo de la red o de Cloudflare.';
   }
 
   return message || `No se pudo consultar RestCountries (HTTP ${status}).`;
 }
 
-async function getObjects<T>(baseUrl: string, path = ''): Promise<T[]> {
-  if (!apiKey) {
+async function getPage<T>(baseUrl: string, path: string, signal?: AbortSignal) {
+  if (!import.meta.env.DEV && !apiKey) {
     throw new Error(
-      'Falta configurar la API key. Copia .env.example a .env y define VITE_RESTCOUNTRIES_API_KEY.',
+      'Falta configurar la API key. Copia .env.example a .env y define QCLI_RESTCOUNTRIES_API_KEY.',
     );
   }
 
+  const url = `${baseUrl}${path}`;
+  const headers: HeadersInit = import.meta.env.DEV
+    ? { 'X-Country-Explorer': 'local' }
+    : { Authorization: `Bearer ${apiKey}` };
+  const request = () => {
+    const timeout = AbortSignal.timeout(8_000);
+    return fetch(url, {
+      headers,
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+    });
+  };
+
   let response: Response;
   try {
-    response = await fetch(`${baseUrl}${path}`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    });
+    response = await request();
+    if (response.status === 502 || response.status === 504) {
+      await response.body?.cancel();
+      response = await request();
+    }
   } catch {
     throw new Error(
-      'No se pudo conectar con RestCountries. Comprueba tu conexión y que localhost esté permitido en los orígenes de tu API key.',
+      'No se pudo conectar con RestCountries. Revisa tu conexión y vuelve a intentar.',
     );
   }
 
@@ -107,7 +140,11 @@ async function getObjects<T>(baseUrl: string, path = ''): Promise<T[]> {
     throw new Error('RestCountries devolvió una respuesta inesperada. Inténtalo de nuevo.');
   }
 
-  return objects;
+  return { objects, more: body?.data?.meta?.more };
+}
+
+async function getObjects<T>(baseUrl: string, path: string, signal?: AbortSignal): Promise<T[]> {
+  return (await getPage<T>(baseUrl, path, signal)).objects;
 }
 
 // Campos que necesita la tarjeta del listado (respuesta mas liviana).
@@ -116,36 +153,25 @@ const LIST_FIELDS =
 const PAGE_SIZE = 100; // maximo por pedido en el plan gratuito
 const listCache = new Map<string, Promise<Country[]>>();
 
-// La API entrega las monedas como lista [{ code, name, symbol }].
-// Se convierten a un objeto indexado por codigo, que es la forma que usan las pantallas.
-function normalizeCountry(country: Country): Country {
-  const raw: unknown = country.currencies;
-  if (!Array.isArray(raw)) return country;
-
-  const currencies: Record<string, CountryCurrency> = {};
-  for (const item of raw as Array<{ code?: string; name?: string; symbol?: string }>) {
-    if (item?.code)
-      currencies[item.code] = { name: item.name ?? null, symbol: item.symbol ?? null };
-  }
-  return { ...country, currencies };
-}
-
 // Trae todas las paginas de un listado y las ordena por nombre.
 async function getCountryList(
   path: string,
   extra: Record<string, string> = {},
 ): Promise<Country[]> {
   const result: Country[] = [];
-  for (let offset = 0; offset < 400; offset += PAGE_SIZE) {
+  for (let offset = 0; ; offset = result.length) {
     const params = new URLSearchParams({
       ...extra,
       limit: String(PAGE_SIZE),
       offset: String(offset),
       response_fields: LIST_FIELDS,
     });
-    const page = await getObjects<Country>(COUNTRIES_BASE_URL, `${path}?${params.toString()}`);
-    result.push(...page.map(normalizeCountry));
-    if (page.length < PAGE_SIZE) break;
+    const { objects, more } = await getPage<Country>(
+      COUNTRIES_BASE_URL,
+      `${path}?${params.toString()}`,
+    );
+    result.push(...objects);
+    if (!objects.length || !(more ?? objects.length === PAGE_SIZE)) break;
   }
   return result
     .filter((country) => country.codes?.alpha_2)
@@ -171,7 +197,7 @@ export function getCountries(): Promise<Country[]> {
 
 // Busqueda por capital: GET /countries/v5/capitals?q={texto}
 export function searchCountriesByCapital(text: string): Promise<Country[]> {
-  const query = text.trim();
+  const query = capitalApiQuery(text);
   return cachedList(`capital:${query.toLowerCase()}`, () =>
     getCountryList('/capitals', { q: query }),
   );
@@ -184,6 +210,31 @@ export function getCountriesByContinent(region: string): Promise<Country[]> {
   );
 }
 
+export function capitalApiQuery(text: string): string {
+  const query = text.trim();
+  const aliases = new Map([
+    ['tokio', 'Tokyo'],
+    ['pekin', 'Beijing'],
+    ['londres', 'London'],
+    ['el cairo', 'Cairo'],
+    ['moscu', 'Moscow'],
+  ]);
+  const normalized = query
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase();
+  return aliases.get(normalized) ?? query;
+}
+
+export async function searchByCapital(query: string, signal?: AbortSignal): Promise<Country[]> {
+  const params = new URLSearchParams({
+    q: capitalApiQuery(query),
+    limit: '25',
+    response_fields: LIST_FIELDS,
+  });
+  return getObjects<Country>(COUNTRIES_BASE_URL, `/capitals?${params.toString()}`, signal);
+}
+
 export async function getCountryByAlpha2(code: string): Promise<Country> {
   const countries = await getObjects<Country>(
     COUNTRIES_BASE_URL,
@@ -191,29 +242,27 @@ export async function getCountryByAlpha2(code: string): Promise<Country> {
   );
   const country = countries[0];
   if (!country) throw new Error('No encontramos ese país. Vuelve al listado e inténtalo otra vez.');
-  return normalizeCountry(country);
+  return country;
 }
 
-export async function getCountryByAlpha3(code: string): Promise<Country | null> {
-  const normalizedCode = code.toUpperCase();
-  const cached = countryByAlpha3Cache.get(normalizedCode);
-  if (cached) return cached;
+export async function getBorderCountries(code: string, borderCodes: string[]): Promise<Country[]> {
+  const allCountries = listCache.get('all');
+  if (allCountries) {
+    const countries = await allCountries.catch(() => []);
+    const neighbors = countries.filter(
+      (country) => country.codes?.alpha_3 && borderCodes.includes(country.codes.alpha_3),
+    );
+    if (neighbors.length === borderCodes.length) return neighbors;
+  }
 
-  const request = getObjects<Country>(
-    COUNTRIES_BASE_URL,
-    `/codes.alpha_3/${encodeURIComponent(normalizedCode)}`,
-  )
-    .then((countries) => (countries[0] ? normalizeCountry(countries[0]) : null))
-    .catch(() => null);
-
-  countryByAlpha3Cache.set(normalizedCode, request);
-  return request;
+  const iso3 = code.toUpperCase();
+  return cachedList(`borders:${iso3}`, () =>
+    getCountryList(`/borders/${encodeURIComponent(iso3)}`),
+  );
 }
 
 export async function getUsdRate(currencyCode: string): Promise<CurrencyRate> {
   const code = currencyCode.toUpperCase();
-  if (code === 'USD') return { base: 'USD', as_of: Date.now() / 1000, rates: { USD: 1 } };
-
   const rates = await getObjects<CurrencyRate>(
     CURRENCIES_BASE_URL,
     `/rates/${encodeURIComponent(code)}`,
@@ -230,17 +279,6 @@ export async function convertToUsd(
   amount: number,
 ): Promise<CurrencyConversion> {
   const code = currencyCode.toUpperCase();
-  if (code === 'USD') {
-    return {
-      from: { code: 'USD', name: 'United States dollar', symbol: '$' },
-      to: { code: 'USD', name: 'United States dollar', symbol: '$' },
-      amount,
-      rate: 1,
-      result: amount,
-      as_of: Date.now() / 1000,
-    };
-  }
-
   const params = new URLSearchParams({ from: code, to: 'USD', amount: String(amount) });
   const conversions = await getObjects<CurrencyConversion>(
     CURRENCIES_BASE_URL,

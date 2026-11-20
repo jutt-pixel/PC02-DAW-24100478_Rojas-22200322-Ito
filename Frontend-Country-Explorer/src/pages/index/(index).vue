@@ -3,60 +3,47 @@
     <section class="intro-row">
       <div class="intro-copy">
         <div class="eyebrow"><span class="eyebrow-line"></span> UNA MIRADA AL MUNDO</div>
-        <h1>Explora el mundo<span class="title-period">.</span></h1>
+        <h1>El mundo, más cerca de ti<span class="title-period">.</span></h1>
         <p>Encuentra un país, descubre sus detalles y revisa su moneda en segundos.</p>
       </div>
-      <div class="intro-map" aria-hidden="true">
-        <div class="map-orbit orbit-one"></div>
-        <div class="map-orbit orbit-two"></div>
-        <q-icon name="public" class="map-globe" />
-        <span class="map-pin pin-one"></span><span class="map-pin pin-two"></span>
-      </div>
-    </section>
-
-    <section class="filters-row" aria-label="Filtros del listado">
-      <div class="filter-field filter-search">
-        <label for="capital-search">Buscar</label>
-        <q-input
-          id="capital-search"
-          :model-value="search"
-          outlined
-          dense
-          clearable
-          bg-color="white"
-          placeholder="Buscar por capital..."
-          aria-label="Buscar por capital"
-          @update:model-value="onSearch"
-        >
-          <template #prepend>
-            <q-icon name="search" />
-          </template>
-        </q-input>
-      </div>
-      <div class="filter-field filter-continent">
-        <label for="continent-select">Continente</label>
-        <q-select
-          v-model="continent"
-          for="continent-select"
-          :options="continentOptions"
-          outlined
-          dense
-          bg-color="white"
-          emit-value
-          map-options
-          aria-label="Filtrar por continente"
+      <div class="intro-art">
+        <img
+          src="/country-explorer-hero.png"
+          alt="Globo terráqueo, banderas, mapa, lupa y monedas que representan la exploración de países"
+          class="intro-art-image"
         />
       </div>
     </section>
 
-    <section class="section-heading-row">
+    <section id="resultados" class="section-heading-row search-results-heading">
       <div>
         <div class="eyebrow">DESCUBRE</div>
-        <h2>{{ hasFilters ? 'Resultados' : 'Todos los países' }}</h2>
+        <h2>{{ capitalQuery ? `Resultados para “${capitalQuery}”` : 'Todos los países' }}</h2>
+        <q-btn
+          v-if="capitalQuery"
+          flat
+          dense
+          no-caps
+          icon="close"
+          label="Limpiar búsqueda"
+          :to="{ path: '/', query: continent ? { continente: continent } : {} }"
+          class="clear-search"
+        />
       </div>
-      <div class="results-label">
-        <span class="results-dot"></span>
-        {{ loading ? 'Buscando países' : `${countries.length} países` }}
+      <div class="results-summary">
+        <span v-if="continent" class="results-label">{{ continentName(continent) }}</span>
+        <div class="results-label" role="status">
+          <span class="results-dot"></span>
+          {{
+            loading
+              ? 'Buscando países'
+              : error
+                ? '0 países'
+                : countries.length === 1
+                  ? '1 país'
+                  : `${countries.length} países`
+          }}
+        </div>
       </div>
     </section>
 
@@ -85,27 +72,36 @@
           class="primary-button"
           @click="loadCountries"
         />
+        <q-btn
+          outline
+          no-caps
+          icon="visibility"
+          label="Ver ejemplo: Perú y su moneda"
+          :to="{ path: '/country/pe', query: { ejemplo: '1' } }"
+        />
         <a href="https://restcountries.com/docs" target="_blank" rel="noreferrer"
           >Ver documentación API <q-icon name="north_east"
         /></a>
       </div>
+      <p class="q-mt-md">
+        El ejemplo permite revisar la interfaz. La tasa y la conversión requieren conexión a la API.
+      </p>
     </section>
 
-    <section v-else-if="!countries.length" class="state-panel">
+    <section v-else-if="!countries.length" class="state-panel" role="status">
       <div class="state-icon"><q-icon name="travel_explore" /></div>
-      <div class="eyebrow">SIN RESULTADOS</div>
       <h2>No encontramos países</h2>
-      <p>Prueba con otra capital u otro continente.</p>
-      <div class="state-actions">
-        <q-btn
-          unelevated
-          no-caps
-          icon="filter_alt_off"
-          label="Limpiar filtros"
-          class="primary-button"
-          @click="clearFilters"
-        />
-      </div>
+      <p v-if="capitalQuery && continent">Prueba a buscar la capital en todos los continentes.</p>
+      <p v-else>Prueba con otra capital o cambia el continente.</p>
+      <q-btn
+        v-if="capitalQuery && continent"
+        unelevated
+        no-caps
+        label="Buscar en todos los continentes"
+        class="primary-button q-mt-md"
+        @click="setContinent('')"
+      />
+      <q-btn flat no-caps label="Limpiar filtros" to="/" />
     </section>
 
     <div v-else class="country-grid">
@@ -118,7 +114,7 @@
         role="link"
         :aria-label="`Ver detalles de ${country.names?.common || 'país'}`"
         @click="openCountry(country)"
-        @keydown.enter="openCountry(country)"
+        @keydown.enter.self="openCountry(country)"
       >
         <div class="country-card-image">
           <div class="country-flag-fallback">
@@ -131,7 +127,9 @@
               @error="hideFlagImage"
             />
           </div>
-          <div class="country-region">{{ continentLabel(country) }}</div>
+          <div class="country-region">
+            {{ formatContinents(country.continents, country.region) }}
+          </div>
           <q-btn
             round
             flat
@@ -155,14 +153,15 @@
               ><q-icon name="groups" /> {{ formatPopulation(country.population) }}</span
             >
             <q-btn
-              v-if="getCurrency(country)"
+              v-for="currency in getCountryCurrencies(country)"
+              :key="currency.code"
               flat
               dense
               no-caps
               class="currency-chip"
-              :label="getCurrency(country)?.code"
-              :aria-label="`Ver tipo de cambio de ${getCurrency(country)?.name}`"
-              @click.stop="openCurrency(country)"
+              :label="currency.code"
+              :aria-label="`Ver tipo de cambio de ${currency.name}`"
+              @click.stop="openCurrency(currency)"
             >
               <q-tooltip>Consultar tipo de cambio</q-tooltip>
             </q-btn>
@@ -181,11 +180,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import { computed, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import CurrencyRateDialog from '@/components/CurrencyRateDialog.vue';
+import { continentName, continentOptions, formatContinents } from '@/data/continents';
 import {
   getCountries,
+  getCountryCurrencies,
   getCountriesByContinent,
   searchCountriesByCapital,
   toUserMessage,
@@ -194,112 +195,68 @@ import {
 } from '@/services/restCountries';
 
 const router = useRouter();
+const route = useRoute();
 const countries = ref<Country[]>([]);
 const loading = ref(true);
 const error = ref('');
 const currencyDialogOpen = ref(false);
 const selectedCurrency = ref<CurrencyInfo | null>(null);
 
-// Filtros del listado: texto de la capital y continente (valor "region" de la API).
-const search = ref('');
-const continent = ref('');
-const continentOptions = [
-  { label: 'Todos los continentes', value: '' },
-  { label: 'África', value: 'Africa' },
-  { label: 'América', value: 'Americas' },
-  { label: 'Asia', value: 'Asia' },
-  { label: 'Europa', value: 'Europe' },
-  { label: 'Oceanía', value: 'Oceania' },
-  { label: 'Antártida', value: 'Antarctic' },
-];
-const continentNames: Record<string, string> = {
-  Africa: 'África',
-  Americas: 'América',
-  'North America': 'Norteamérica',
-  'South America': 'Sudamérica',
-  Asia: 'Asia',
-  Europe: 'Europa',
-  Oceania: 'Oceanía',
-  Antarctic: 'Antártida',
-  Antarctica: 'Antártida',
-};
-const hasFilters = computed(() => search.value.trim() !== '' || continent.value !== '');
+const capitalQuery = computed(() =>
+  typeof route.query.capital === 'string' ? route.query.capital.trim() : '',
+);
+const continent = computed(
+  () => continentOptions.find(({ value }) => value === route.query.continente)?.value ?? '',
+);
+function setContinent(value: string) {
+  const query = { ...route.query };
+  if (value) query.continente = value;
+  else delete query.continente;
+  void router.push({ path: '/', query, hash: route.hash });
+}
 
-let searchTimer: ReturnType<typeof setTimeout> | undefined;
-let lastRequest = 0;
-
-onMounted(loadCountries);
-
-// Espera 400 ms despues de la ultima tecla para no gastar consultas.
-watch(search, () => {
-  clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => void loadCountries(), 400);
-});
-watch(continent, () => {
-  clearTimeout(searchTimer);
-  void loadCountries();
-});
+let requestId = 0;
+watch(
+  [capitalQuery, continent],
+  () => {
+    void loadCountries();
+  },
+  { immediate: true },
+);
 
 async function loadCountries() {
-  const requestId = ++lastRequest;
+  const currentRequest = ++requestId;
   loading.value = true;
   error.value = '';
-
-  const text = search.value.trim();
-  const region = continent.value;
-
   try {
+    const capital = capitalQuery.value;
+    const region = continent.value;
     let result: Country[];
-    if (text) {
-      // Con texto se consulta por capital; el continente se aplica sobre ese resultado.
-      result = await searchCountriesByCapital(text);
+    if (capital) {
+      result = await searchCountriesByCapital(capital);
       if (region) result = result.filter((country) => country.region === region);
-    } else if (region) {
-      result = await getCountriesByContinent(region);
     } else {
-      result = await getCountries();
+      result = await (region ? getCountriesByContinent(region) : getCountries());
     }
-    // Si llega una respuesta antigua despues de una nueva, se descarta.
-    if (requestId !== lastRequest) return;
-    countries.value = result;
+    if (currentRequest === requestId) countries.value = result;
   } catch (cause) {
-    if (requestId !== lastRequest) return;
-    countries.value = [];
-    error.value = toUserMessage(cause);
+    if (currentRequest === requestId) error.value = toUserMessage(cause);
   } finally {
-    if (requestId === lastRequest) loading.value = false;
+    if (currentRequest === requestId) loading.value = false;
   }
-}
-
-function onSearch(value: string | number | null) {
-  // Al limpiar el campo, Quasar entrega null.
-  search.value = value === null ? '' : String(value);
-}
-
-function clearFilters() {
-  search.value = '';
-  continent.value = '';
-}
-
-function continentLabel(country: Country) {
-  const value = country.continents?.[0] || country.region || '';
-  return continentNames[value] ?? (value || 'Continente no disponible');
-}
-
-function getCurrency(country: Country): CurrencyInfo | null {
-  const [code, currency] = Object.entries(country.currencies ?? {})[0] ?? [];
-  if (!code) return null;
-  return { code, name: currency?.name || code, symbol: currency?.symbol ?? null };
 }
 
 function openCountry(country: Country) {
   const code = country.codes?.alpha_2;
-  if (code) void router.push(`/country/${code.toLowerCase()}`);
+  if (code) {
+    const { capital, continente } = route.query;
+    void router.push({ path: `/country/${code.toLowerCase()}`, query: { capital, continente } });
+  }
 }
 
-function openCurrency(country: Country) {
-  selectedCurrency.value = getCurrency(country);
-  currencyDialogOpen.value = selectedCurrency.value !== null;
+function openCurrency(currency: CurrencyInfo) {
+  selectedCurrency.value = currency;
+  currencyDialogOpen.value = true;
 }
 
 function formatPopulation(population: number | null | undefined) {

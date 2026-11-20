@@ -3,7 +3,10 @@
 
 import { defineConfig } from '#q-app';
 
-export default defineConfig((/* ctx */) => {
+export default defineConfig((ctx) => {
+  const restCountriesKey =
+    import.meta.env.QCLI_RESTCOUNTRIES_API_KEY?.trim() ||
+    import.meta.env.VITE_RESTCOUNTRIES_API_KEY?.trim();
   return {
     // https://v2.quasar.dev/quasar-cli-vite/prefetch-feature
     // preFetch: true,
@@ -31,10 +34,9 @@ export default defineConfig((/* ctx */) => {
 
     // https://v2.quasar.dev/quasar-cli-vite/quasar-config-file#build
     build: {
-      // Quasar CLI expone por defecto solo variables con prefijo QCLI_.
-      // Se usa VITE_ para que funcione VITE_RESTCOUNTRIES_API_KEY del archivo .env
+      // El proxy añade la clave en desarrollo. La SPA estática usa la configuración del navegador.
       env: {
-        clientPrefix: 'VITE_',
+        clientPrefix: ctx.dev ? 'QCLI_PUBLIC_' : ['QCLI_', 'VITE_RESTCOUNTRIES_API_'],
       },
 
       target: {
@@ -85,6 +87,44 @@ export default defineConfig((/* ctx */) => {
 
     // https://v2.quasar.dev/quasar-cli-vite/quasar-config-file#devserver
     devServer: {
+      host: 'localhost',
+      proxy: {
+        '^/api/restcountries/(countries/v5|currencies/v1)(/|\\?|$)': {
+          target: 'https://api.restcountries.com',
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/api\/restcountries/, ''),
+          bypass(req, res) {
+            if (
+              !res ||
+              req.method !== 'GET' ||
+              req.headers['x-country-explorer'] !== 'local' ||
+              (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`)
+            ) {
+              return false;
+            }
+            if (restCountriesKey) return;
+            res.statusCode = 503;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(
+              JSON.stringify({
+                errors: [
+                  { message: 'Configura QCLI_RESTCOUNTRIES_API_KEY en .env y reinicia Quasar.' },
+                ],
+              }),
+            );
+            return req.url ?? '/';
+          },
+          configure(proxy) {
+            proxy.on('proxyReq', (outgoing) => {
+              outgoing.removeHeader('origin');
+              outgoing.removeHeader('referer');
+              outgoing.removeHeader('cookie');
+              outgoing.removeHeader('x-country-explorer');
+              outgoing.setHeader('Authorization', `Bearer ${restCountriesKey}`);
+            });
+          },
+        },
+      },
       // vueDevtools: true,
       // https: true,
       open: true, // opens browser window automatically

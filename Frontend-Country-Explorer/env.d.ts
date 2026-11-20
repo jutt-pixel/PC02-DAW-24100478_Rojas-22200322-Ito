@@ -13,5 +13,6 @@
  * }
  */
 interface ImportMetaEnv {
+  readonly QCLI_RESTCOUNTRIES_API_KEY?: string;
   readonly VITE_RESTCOUNTRIES_API_KEY?: string;
 }

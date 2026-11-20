@@ -1,9 +1,20 @@
 <template>
-  <q-dialog v-model="isOpen" persistent transition-show="scale" transition-hide="scale">
+  <q-dialog
+    v-model="isOpen"
+    persistent
+    backdrop-filter="blur(8px)"
+    :aria-labelledby="titleId"
+    transition-show="scale"
+    transition-hide="scale"
+  >
     <q-card class="currency-dialog">
       <div class="dialog-topline">
         <div class="currency-symbol-mark">
           {{ currency?.symbol || currency?.code?.slice(0, 1) || '¤' }}
+        </div>
+        <div class="dialog-heading">
+          <h2 :id="titleId">{{ currency?.name || 'Moneda' }}</h2>
+          <span class="currency-code-pill">{{ currency?.code || '—' }}</span>
         </div>
         <q-btn
           flat
@@ -16,23 +27,8 @@
         />
       </div>
 
-      <div class="dialog-heading">
-        <div class="eyebrow">CONVERSOR DE DIVISAS</div>
-        <h2>{{ currency?.name || 'Moneda' }}</h2>
-        <div class="currency-code-line">
-          <span class="currency-code-pill">{{ currency?.code || '—' }}</span>
-          <span v-if="currency?.symbol" class="muted-copy">Símbolo {{ currency.symbol }}</span>
-        </div>
-      </div>
-
-      <q-card-section class="rate-panel">
-        <div class="rate-panel-top">
-          <div>
-            <div class="rate-label">Tipo de cambio actual</div>
-            <div class="rate-base">frente al dólar estadounidense</div>
-          </div>
-          <span class="live-indicator"><i></i> API</span>
-        </div>
+      <q-card-section class="rate-panel q--avoid-card-border">
+        <div class="rate-label">Tipo de cambio</div>
 
         <q-skeleton v-if="loadingRate" type="text" width="78%" height="42px" class="q-mt-sm" />
         <div v-else-if="rateError" class="inline-error q-mt-md">
@@ -51,25 +47,17 @@
       </q-card-section>
 
       <q-card-section class="convert-section">
-        <div class="convert-section-heading">
-          <div>
-            <div class="eyebrow">HAZ EL CÁLCULO</div>
-            <h3>Convierte a USD</h3>
-          </div>
-          <div class="convert-target">USD <span>$</span></div>
-        </div>
-
         <q-form class="convert-form" @submit.prevent="convert">
           <q-input
             v-model.number="amount"
             outlined
             dense
             type="number"
-            min="0.01"
+            min="0"
             step="any"
             :prefix="currency?.symbol || undefined"
             :suffix="currency?.symbol ? undefined : currency?.code"
-            label="Monto a convertir"
+            label="Monto"
             inputmode="decimal"
             :disable="converting"
             class="amount-input"
@@ -89,21 +77,18 @@
         <div v-if="conversionError" class="conversion-error">{{ conversionError }}</div>
         <div v-else-if="convertedAmount !== null" class="conversion-result" aria-live="polite">
           <div>
-            <span class="result-label">Resultado estimado</span>
+            <span class="result-label">Resultado en USD</span>
             <strong>{{ formatUsd(convertedAmount) }}</strong>
           </div>
           <q-icon name="check_circle" color="positive" size="22px" />
         </div>
-        <p class="conversion-footnote">
-          Tasas de referencia. El monto final puede variar según el proveedor de cambio.
-        </p>
       </q-card-section>
     </q-card>
   </q-dialog>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, ref, useId, watch } from 'vue';
 import {
   convertToUsd,
   getUsdRate,
@@ -111,6 +96,7 @@ import {
   type CurrencyInfo,
 } from '@/services/restCountries';
 
+const titleId = useId();
 const props = defineProps<{ currency: CurrencyInfo | null }>();
 const isOpen = defineModel<boolean>({ default: false });
 
@@ -125,9 +111,15 @@ const convertedAmount = ref<number | null>(null);
 
 const currencyCode = computed(() => props.currency?.code?.toUpperCase() ?? '');
 
+let rateRequest = 0;
+let conversionRequest = 0;
+
 watch(
   [isOpen, currencyCode],
   ([open]) => {
+    rateRequest++;
+    conversionRequest++;
+    converting.value = false;
     if (open) {
       amount.value = 1;
       convertedAmount.value = null;
@@ -140,18 +132,20 @@ watch(
 
 async function loadRate() {
   if (!currencyCode.value) return;
+  const request = ++rateRequest;
   loadingRate.value = true;
   rateError.value = '';
   rate.value = null;
   asOf.value = null;
   try {
     const response = await getUsdRate(currencyCode.value);
+    if (request !== rateRequest) return;
     rate.value = response.rates.USD ?? null;
     asOf.value = response.as_of;
   } catch (error) {
-    rateError.value = toUserMessage(error);
+    if (request === rateRequest) rateError.value = toUserMessage(error);
   } finally {
-    loadingRate.value = false;
+    if (request === rateRequest) loadingRate.value = false;
   }
 }
 
@@ -164,17 +158,17 @@ async function convert() {
   }
 
   if (!currencyCode.value) return;
+  const request = ++conversionRequest;
   converting.value = true;
   conversionError.value = '';
   convertedAmount.value = null;
   try {
     const response = await convertToUsd(currencyCode.value, value);
-    convertedAmount.value = response.result;
-    asOf.value = response.as_of || asOf.value;
+    if (request === conversionRequest) convertedAmount.value = response.result;
   } catch (error) {
-    conversionError.value = toUserMessage(error);
+    if (request === conversionRequest) conversionError.value = toUserMessage(error);
   } finally {
-    converting.value = false;
+    if (request === conversionRequest) converting.value = false;
   }
 }
 
