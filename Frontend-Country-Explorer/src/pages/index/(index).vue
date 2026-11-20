@@ -3,25 +3,47 @@
     <section class="intro-row">
       <div class="intro-copy">
         <div class="eyebrow"><span class="eyebrow-line"></span> UNA MIRADA AL MUNDO</div>
-        <h1>Explora el mundo<span class="title-period">.</span></h1>
+        <h1>El mundo, más cerca de ti<span class="title-period">.</span></h1>
         <p>Encuentra un país, descubre sus detalles y revisa su moneda en segundos.</p>
       </div>
-      <div class="intro-map" aria-hidden="true">
-        <div class="map-orbit orbit-one"></div>
-        <div class="map-orbit orbit-two"></div>
-        <q-icon name="public" class="map-globe" />
-        <span class="map-pin pin-one"></span><span class="map-pin pin-two"></span>
+      <div class="intro-art">
+        <img
+          src="/country-explorer-hero.png"
+          alt="Globo terráqueo, banderas, mapa, lupa y monedas que representan la exploración de países"
+          class="intro-art-image"
+        />
       </div>
     </section>
 
-    <section class="section-heading-row">
+    <section id="resultados" class="section-heading-row search-results-heading">
       <div>
         <div class="eyebrow">DESCUBRE</div>
-        <h2>Países destacados</h2>
+        <h2>{{ capitalQuery ? `Resultados para “${capitalQuery}”` : 'Todos los países' }}</h2>
+        <q-btn
+          v-if="capitalQuery"
+          flat
+          dense
+          no-caps
+          icon="close"
+          label="Limpiar búsqueda"
+          :to="{ path: '/', query: continent ? { continente: continent } : {} }"
+          class="clear-search"
+        />
       </div>
-      <div class="results-label">
-        <span class="results-dot"></span>
-        {{ loading ? 'Buscando países' : `${countries.length} países` }}
+      <div class="results-summary">
+        <span v-if="continent" class="results-label">{{ continentName(continent) }}</span>
+        <div class="results-label" role="status">
+          <span class="results-dot"></span>
+          {{
+            loading
+              ? 'Buscando países'
+              : error
+                ? '0 países'
+                : countries.length === 1
+                  ? '1 país'
+                  : `${countries.length} países`
+          }}
+        </div>
       </div>
     </section>
 
@@ -50,10 +72,36 @@
           class="primary-button"
           @click="loadCountries"
         />
+        <q-btn
+          outline
+          no-caps
+          icon="visibility"
+          label="Ver ejemplo: Perú y su moneda"
+          :to="{ path: '/country/pe', query: { ejemplo: '1' } }"
+        />
         <a href="https://restcountries.com/docs" target="_blank" rel="noreferrer"
           >Ver documentación API <q-icon name="north_east"
         /></a>
       </div>
+      <p class="q-mt-md">
+        El ejemplo permite revisar la interfaz. La tasa y la conversión requieren conexión a la API.
+      </p>
+    </section>
+
+    <section v-else-if="!countries.length" class="state-panel" role="status">
+      <div class="state-icon"><q-icon name="travel_explore" /></div>
+      <h2>No encontramos países</h2>
+      <p v-if="capitalQuery && continent">Prueba a buscar la capital en todos los continentes.</p>
+      <p v-else>Prueba con otra capital o cambia el continente.</p>
+      <q-btn
+        v-if="capitalQuery && continent"
+        unelevated
+        no-caps
+        label="Buscar en todos los continentes"
+        class="primary-button q-mt-md"
+        @click="setContinent('')"
+      />
+      <q-btn flat no-caps label="Limpiar filtros" to="/" />
     </section>
 
     <div v-else class="country-grid">
@@ -66,7 +114,7 @@
         role="link"
         :aria-label="`Ver detalles de ${country.names?.common || 'país'}`"
         @click="openCountry(country)"
-        @keydown.enter="openCountry(country)"
+        @keydown.enter.self="openCountry(country)"
       >
         <div class="country-card-image">
           <div class="country-flag-fallback">
@@ -79,7 +127,9 @@
               @error="hideFlagImage"
             />
           </div>
-          <div class="country-region">{{ country.region || 'Región no disponible' }}</div>
+          <div class="country-region">
+            {{ formatContinents(country.continents, country.region) }}
+          </div>
           <q-btn
             round
             flat
@@ -103,14 +153,15 @@
               ><q-icon name="groups" /> {{ formatPopulation(country.population) }}</span
             >
             <q-btn
-              v-if="getCurrency(country)"
+              v-for="currency in getCountryCurrencies(country)"
+              :key="currency.code"
               flat
               dense
               no-caps
               class="currency-chip"
-              :label="getCurrency(country)?.code"
-              :aria-label="`Ver tipo de cambio de ${getCurrency(country)?.name}`"
-              @click.stop="openCurrency(country)"
+              :label="currency.code"
+              :aria-label="`Ver tipo de cambio de ${currency.name}`"
+              @click.stop="openCurrency(currency)"
             >
               <q-tooltip>Consultar tipo de cambio</q-tooltip>
             </q-btn>
@@ -129,51 +180,83 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { computed, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import CurrencyRateDialog from '@/components/CurrencyRateDialog.vue';
+import { continentName, continentOptions, formatContinents } from '@/data/continents';
 import {
   getCountries,
+  getCountryCurrencies,
+  getCountriesByContinent,
+  searchCountriesByCapital,
   toUserMessage,
   type Country,
   type CurrencyInfo,
 } from '@/services/restCountries';
 
 const router = useRouter();
+const route = useRoute();
 const countries = ref<Country[]>([]);
 const loading = ref(true);
 const error = ref('');
 const currencyDialogOpen = ref(false);
 const selectedCurrency = ref<CurrencyInfo | null>(null);
 
-onMounted(loadCountries);
+const capitalQuery = computed(() =>
+  typeof route.query.capital === 'string' ? route.query.capital.trim() : '',
+);
+const continent = computed(
+  () => continentOptions.find(({ value }) => value === route.query.continente)?.value ?? '',
+);
+function setContinent(value: string) {
+  const query = { ...route.query };
+  if (value) query.continente = value;
+  else delete query.continente;
+  void router.push({ path: '/', query, hash: route.hash });
+}
+
+let requestId = 0;
+watch(
+  [capitalQuery, continent],
+  () => {
+    void loadCountries();
+  },
+  { immediate: true },
+);
 
 async function loadCountries() {
+  const currentRequest = ++requestId;
   loading.value = true;
   error.value = '';
   try {
-    countries.value = await getCountries();
+    const capital = capitalQuery.value;
+    const region = continent.value;
+    let result: Country[];
+    if (capital) {
+      result = await searchCountriesByCapital(capital);
+      if (region) result = result.filter((country) => country.region === region);
+    } else {
+      result = await (region ? getCountriesByContinent(region) : getCountries());
+    }
+    if (currentRequest === requestId) countries.value = result;
   } catch (cause) {
-    error.value = toUserMessage(cause);
+    if (currentRequest === requestId) error.value = toUserMessage(cause);
   } finally {
-    loading.value = false;
+    if (currentRequest === requestId) loading.value = false;
   }
-}
-
-function getCurrency(country: Country): CurrencyInfo | null {
-  const [code, currency] = Object.entries(country.currencies ?? {})[0] ?? [];
-  if (!code) return null;
-  return { code, name: currency?.name || code, symbol: currency?.symbol ?? null };
 }
 
 function openCountry(country: Country) {
   const code = country.codes?.alpha_2;
-  if (code) void router.push(`/country/${code.toLowerCase()}`);
+  if (code) {
+    const { capital, continente } = route.query;
+    void router.push({ path: `/country/${code.toLowerCase()}`, query: { capital, continente } });
+  }
 }
 
-function openCurrency(country: Country) {
-  selectedCurrency.value = getCurrency(country);
-  currencyDialogOpen.value = selectedCurrency.value !== null;
+function openCurrency(currency: CurrencyInfo) {
+  selectedCurrency.value = currency;
+  currencyDialogOpen.value = true;
 }
 
 function formatPopulation(population: number | null | undefined) {
