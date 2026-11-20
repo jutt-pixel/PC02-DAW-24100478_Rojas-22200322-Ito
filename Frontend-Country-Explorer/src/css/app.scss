@@ -1,1 +1,22 @@
-// app global css
+// Estilos generales de la aplicacion.
+
+body {
+  background: #f4f6f8;
+  color: #1f2933;
+}
+
+.page-container {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+
+.country-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 16px;
+}
+
+.text-muted {
+  color: #6b7785;
+}
