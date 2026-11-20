@@ -242,7 +242,7 @@ interface BorderCountry {
   flag: string;
 }
 
-const route = useRoute();
+const route = useRoute('//country/[code]');
 const country = ref<Country | null>(null);
 const borderCountries = ref<BorderCountry[]>([]);
 const loading = ref(true);
@@ -269,7 +269,7 @@ const currency = computed<CurrencyInfo | null>(() => {
 });
 
 watch(
-  () => (route.params as Record<string, string | string[]>).code,
+  () => route.params.code,
   (code) => {
     if (typeof code === 'string') void loadCountry(code);
   },
