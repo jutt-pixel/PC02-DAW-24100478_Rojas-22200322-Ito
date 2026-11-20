@@ -37,7 +37,8 @@ declare module 'vue-router/auto-routes' {
       Record<never, never>,
       Record<never, never>,
       | '//(index)'
-      | '//pais/[code]'
+      | '//country/[code]'
+      | '//second'
     >,
     '//(index)': RouteRecordInfo<
       '//(index)',
@@ -46,11 +47,18 @@ declare module 'vue-router/auto-routes' {
       Record<never, never>,
       | never
     >,
-    '//pais/[code]': RouteRecordInfo<
-      '//pais/[code]',
-      '/pais/:code',
+    '//country/[code]': RouteRecordInfo<
+      '//country/[code]',
+      '/country/:code',
       { code: ParamValue<true> },
       { code: ParamValue<false> },
+      | never
+    >,
+    '//second': RouteRecordInfo<
+      '//second',
+      '/second',
+      Record<never, never>,
+      Record<never, never>,
       | never
     >,
     '/[...path]': RouteRecordInfo<
@@ -77,7 +85,8 @@ declare module 'vue-router/auto-routes' {
       routes:
         | '/'
         | '//(index)'
-        | '//pais/[code]'
+        | '//country/[code]'
+        | '//second'
       views:
         | 'default'
       pathParamNames:
@@ -91,13 +100,21 @@ declare module 'vue-router/auto-routes' {
       pathParamNames:
         | never
     }
-    'src/pages/index/pais/[code].vue': {
+    'src/pages/index/country/[code].vue': {
       routes:
-        | '//pais/[code]'
+        | '//country/[code]'
       views:
         | never
       pathParamNames:
         | 'code'
+    }
+    'src/pages/index/second.vue': {
+      routes:
+        | '//second'
+      views:
+        | never
+      pathParamNames:
+        | never
     }
     'src/pages/[...path].vue': {
       routes:

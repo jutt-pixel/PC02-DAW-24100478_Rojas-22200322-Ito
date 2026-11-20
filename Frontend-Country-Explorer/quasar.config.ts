@@ -31,6 +31,12 @@ export default defineConfig((/* ctx */) => {
 
     // https://v2.quasar.dev/quasar-cli-vite/quasar-config-file#build
     build: {
+      // Quasar CLI expone por defecto solo variables con prefijo QCLI_.
+      // Se usa VITE_ para que funcione VITE_RESTCOUNTRIES_API_KEY del archivo .env
+      env: {
+        clientPrefix: 'VITE_',
+      },
+
       target: {
         // browser: 'baseline-widely-available',
         // node: 'node22'

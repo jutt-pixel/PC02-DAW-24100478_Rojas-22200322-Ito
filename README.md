@@ -4,33 +4,34 @@ Práctica calificada 02 del curso **Desarrollo de Aplicaciones Web**.
 
 Aplicación de frontend hecha con **Vue 3** (Composition API y `script setup`), **Quasar** y TypeScript que consume la API pública de **RestCountries** para explorar países: listado con búsqueda y filtro, vista de detalle y panel de tipo de cambio.
 
+El proyecto está en la carpeta `Frontend-Country-Explorer`.
+
 ## Integrantes y reparto del trabajo
 
-| Integrante | Código   | Parte a cargo                          |
-| ---------- | -------- | -------------------------------------- |
-| Rojas      | 24100478 | **Parte A – Listado de países**        |
-| Ito        | 22200322 | **Parte B – Detalle y tipo de cambio** |
+| Integrante | Código   | Parte a cargo                                      |
+| ---------- | -------- | -------------------------------------------------- |
+| Rojas      | 24100478 | **Parte A – Listado de países, búsqueda y filtro** |
+| Ito        | 22200322 | **Parte B – Detalle del país y tipo de cambio**    |
 
-### Parte A – Listado de países (Rojas)
+### Parte A – Listado, búsqueda y filtro (Rojas)
 
-- Estructura común de las pantallas y aviso de clave faltante: `src/pages/index.vue`, `MissingKeyNotice.vue`
-- Cliente HTTP con la cabecera de autenticación, caché en memoria y manejo de errores: `src/services/http.ts`
-- Servicio de países (listado, búsqueda por capital, filtro por continente, paginación): `src/services/countries.ts`
-- Estado del listado con espera de 400 ms en el buscador: `src/composables/useCountries.ts`
-- Pantalla de listado: `src/pages/index/(index).vue`
-- Componentes: `CountryFilters.vue`, `CountryCard.vue`, `CurrencyChip.vue`, `LoadingGrid.vue`, `StateMessage.vue`
-- Utilidades de formato: `src/utils/format.ts`, `src/utils/labels.ts` y los tipos de `src/types/country.ts`
+- **Buscador por capital** con espera de 400 ms después de la última tecla: `src/pages/index/(index).vue`
+- **Selector de continente** (reemplaza el campo región de la API): `src/pages/index/(index).vue`
+- **Listado completo de países**: la API entrega como máximo 100 por pedido, así que se recorren las páginas (`limit` y `offset`) y se pide solo lo que muestra la tarjeta (`response_fields`): `src/services/restCountries.ts`
+- Funciones del servicio `getCountries`, `searchCountriesByCapital` y `getCountriesByContinent`, con memoria de respuestas para cuidar el límite de consultas: `src/services/restCountries.ts`
+- Continente en cada tarjeta y estado **«sin resultados»** con botón «Limpiar filtros».
+- Descarte de respuestas antiguas cuando llega una búsqueda más nueva.
+- Conversión de las monedas que entrega la API (lista) a la forma que usan las pantallas (función `normalizeCountry`).
+- Lectura de la clave desde el archivo `.env` con Quasar CLI (prefijo `VITE_` en `quasar.config.ts`) y mensaje claro cuando la clave no admite el origen `localhost`.
+- Estilos de la fila de filtros: `src/css/app.scss`
 
 ### Parte B – Detalle y tipo de cambio (Ito)
 
-- Servicio de monedas (tasa frente al dólar y conversión de montos): `src/services/currencies.ts`
-- Estado del detalle y de los países fronterizos: `src/composables/useCountry.ts`
-- Estado del panel de moneda: `src/composables/useCurrency.ts`
-- Pantalla de detalle: `src/pages/index/pais/[code].vue`
-- Componentes: `CurrencyDialog.vue`, `InfoItem.vue`
-- Estados de carga, error y «país no encontrado» de la vista de detalle.
-
-Las dos partes comparten el cliente HTTP, el componente `StateMessage.vue` y el panel `CurrencyDialog.vue` (se abre tanto desde la tarjeta del listado como desde el detalle).
+- Estructura del proyecto con Quasar CLI, diseño general y cabecera: `src/pages/index.vue`, `src/css/app.scss`
+- Tarjetas del listado y estados de carga y de error.
+- **Vista de detalle del país** (bandera, capital, población, superficie, idiomas, zonas horarias, código telefónico, dominio, lado de conducción y países fronterizos): `src/pages/index/country/[code].vue`
+- **Panel de tipo de cambio** con la tasa frente al dólar y el conversor a USD: `src/components/CurrencyRateDialog.vue`
+- Funciones del servicio para el detalle, la tasa y la conversión: `src/services/restCountries.ts`
 
 ## Funcionalidades
 
@@ -42,39 +43,32 @@ Las dos partes comparten el cliente HTTP, el componente `StateMessage.vue` y el 
 
 **Pantalla 2 – Detalle**
 
-- Reemplaza al listado (no es una ventana aparte) y tiene el botón «Volver al listado».
+- Reemplaza al listado (no es una ventana aparte).
 - Bandera grande, nombre, continente y capital destacada.
-- Población, área, moneda, idiomas, zona horaria, código telefónico, dominio y lado de conducción.
-- Países fronterizos (se puede tocar cada uno para ir a su detalle).
+- Población, área, idiomas, zona horaria, código telefónico, dominio y lado de conducción.
+- Países fronterizos.
 
 **Panel de moneda**
 
 - Nombre, código y símbolo de la moneda.
 - Tasa actual frente al dólar (USD).
-- Conversor: monto + botón «Convertir a USD».
+- Conversor: monto y botón para convertir a USD.
 
 **Estados**
 
-- Carga: tarjetas esqueleto en el listado y en el detalle, indicador en el panel de moneda.
-- Error: mensaje claro según el caso (sin conexión, clave inválida, límite de consultas) con botón «Reintentar».
-- Sin resultados: mensaje con botón «Limpiar filtros».
-
-## Requisitos
-
-- Node.js 22.12 o superior.
-- Una clave gratuita de RestCountries.
+- Carga, error con botón «Reintentar» y «sin resultados» con botón «Limpiar filtros».
 
 ## Configuración de la clave de la API
 
 1. Crear una cuenta en <https://restcountries.com/sign-up> y copiar la clave.
-2. En <https://restcountries.com/api-keys>, abrir la clave y agregar `localhost` en **CORS allowed origins**. Sin este paso la API rechaza los pedidos hechos desde el navegador.
-3. Dentro de la carpeta `Frontend-Country-Explorer`, copiar el archivo `.env.example` como `.env.local` y colocar la clave:
+2. En <https://restcountries.com/api-keys>, abrir la clave (Edit API key), usar el enlace **Add localhost & 127.0.0.1** en **CORS allowed origins** y guardar. Sin este paso la API rechaza los pedidos hechos desde el navegador.
+3. Dentro de la carpeta `Frontend-Country-Explorer`, copiar el archivo `.env.example` como `.env` y colocar la clave:
 
 ```
-QCLI_RESTCOUNTRIES_KEY=tu_clave
+VITE_RESTCOUNTRIES_API_KEY=tu_clave
 ```
 
-El archivo `.env.local` no se sube al repositorio. El prefijo `QCLI_` es el que Quasar CLI expone a la aplicación.
+El archivo `.env` no se sube al repositorio.
 
 ## Cómo ejecutar
 
@@ -106,38 +100,8 @@ npm run build
 - Base de países: `https://api.restcountries.com/countries/v5`
 - Base de monedas: `https://api.restcountries.com/currencies/v1`
 - Autenticación: cabecera `Authorization: Bearer <clave>`
-- Banderas: `https://flagcdn.com/w320/{codigo}.png` (miniaturas con `w80`).
+- Banderas: `https://flagcdn.com/w160/{codigo}.png`
 
-## Estructura del proyecto
+## Calidad
 
-```
-Frontend-Country-Explorer/
-  src/
-    pages/
-      index.vue              Estructura común de las pantallas
-      index/(index).vue      Pantalla 1: listado
-      index/pais/[code].vue  Pantalla 2: detalle
-    components/              Componentes reutilizables
-    composables/
-      useCountries.ts        Estado del listado
-      useCountry.ts          Estado del detalle
-      useCurrency.ts         Estado del panel de moneda
-    services/
-      http.ts                Cliente HTTP, caché y errores
-      countries.ts           Endpoints de países y normalización
-      currencies.ts          Endpoints de monedas
-    types/country.ts         Tipos de datos
-    utils/                   Formato de números y etiquetas
-    css/                     Estilos
-```
-
-Las rutas se generan a partir de los archivos de `src/pages` (el detalle queda en `/pais/:code`).
-
-## Decisiones de implementación
-
-- **Cuidado del límite de consultas:** las respuestas se guardan en memoria durante 10 minutos y el buscador espera 400 ms después de la última tecla antes de consultar.
-- **Listado completo:** la API entrega como máximo 100 países por pedido, por eso el listado se trae en páginas (`limit` y `offset`) y se pide solo lo que muestra la tarjeta (`response_fields`).
-- **Respuestas fuera de orden:** si llega una respuesta antigua después de una nueva, se descarta.
-- **Normalización:** la respuesta de la API se convierte en un objeto simple en `countries.js`, así los componentes no dependen del formato del servicio.
-- **Clave fuera del código:** se lee de una variable de entorno; si falta, la aplicación muestra cómo configurarla.
-- **Calidad:** el proyecto pasa `npm run lint:check` y `npm run typecheck`.
+El proyecto pasa `npm run lint:check`, `npm run typecheck` y `npm run build`.
